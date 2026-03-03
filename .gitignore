@@ -6,7 +6,6 @@ coverage/
 .DS_Store
 *.log
 .env*
-!.env.example
 
 # --- Python 必备忽略项 (⚠️ 非常重要) ---
 # 虚拟环境 (绝对不能传)
