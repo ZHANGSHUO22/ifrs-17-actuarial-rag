@@ -1,263 +1,328 @@
 import streamlit as st
-from streamlit_pdf_viewer import pdf_viewer # 确保安装了 pip install streamlit-pdf-viewer
-import base64
+from streamlit_pdf_viewer import pdf_viewer
 import requests
 import os
 
-# --- 1. 语言包配置 (Language Dictionary) ---
-# 这里定义了所有界面文字的中/英/捷克语映射
+# --- 配置 ---
+st.set_page_config(page_title="IFRS 17 Copilot", layout="wide")
+BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+
+# --- 语言包 ---
 TRANSLATIONS = {
     "en": {
-        "page_title": "IFRS 17 Actuarial Copilot",
-        "sidebar_title": "📂 Document Ingestion",
-        "upload_label": "Upload IFRS 17 PDFs",
-        "ingest_btn": "Ingest Document",
-        "ingest_success": "✅ Indexed:",
-        "ingest_error": "Error:",
-        "connect_error": "Connection failed:",
-        "select_file_warn": "Please select a file first.",
-        "expertise_title": "**Expertise Areas:**",
-        "chat_title": "💬 Actuarial Chat",
-        "chat_placeholder": "Ask a question about IFRS 17... (You can ask in English, Czech or Chinese)",
-        "analyzing": "🔍 Analyzing regulations & Retrieving context...",
-        "backend_error": "Backend Error:",
-        "source_trace": "### 🔍 Source Trace",
-        "select_source_instruction": "Click below to jump to the PDF page:",
-        "snippet_label": "**💡 Text Snippet from page:**",
-        "viewer_title": "📄 Regulatory Document Viewer",
-        "viewer_placeholder": "👈 Ask a question on the left to see the document here.",
-        "waiting_msg": "Waiting for Analysis...",
-        "waiting_sub": "Upload a document and ask a question to begin."
+        "sidebar_title": "📂 Knowledge Base",
+        "source_select": "Select Source:",
+        "option_upload": "📤 Upload New File",
+        "option_library": "📚 Public Library (Built-in)",
+        "library_label": "Choose a document:",
+        "upload_label": "Upload PDF",
+        "chat_placeholder": "Ask about IFRS 17...",
+        "ingest_btn": "Process Upload",
+        "analyzing": "🔍 Searching...",
+        "snippet_label": "💡 Relevant Context:",
+        "page_ref": "Page"
     },
-    "cs": {  # Czech Translations
-        "page_title": "IFRS 17 Pojistně-matematický Copilot",
-        "sidebar_title": "📂 Nahrávání dokumentů",
-        "upload_label": "Nahrát IFRS 17 PDF soubory",
-        "ingest_btn": "Zpracovat dokument",
-        "ingest_success": "✅ Indexováno:",
-        "ingest_error": "Chyba:",
-        "connect_error": "Připojení selhalo:",
-        "select_file_warn": "Nejprve vyberte soubor.",
-        "expertise_title": "**Oblasti expertní znalosti:**",
-        "chat_title": "💬 Chat s pojistným matematikem",
-        "chat_placeholder": "Položte otázku k IFRS 17... (Můžete se ptát anglicky, česky nebo čínsky)",
-        "analyzing": "🔍 Analyzuji předpisy a hledám kontext...",
-        "backend_error": "Chyba backendu:",
-        "source_trace": "### 🔍 Zdrojové citace",
-        "select_source_instruction": "Klikněte níže pro přechod na stránku PDF:",
-        "snippet_label": "**💡 Úryvek textu ze stránky:**",
-        "viewer_title": "📄 Prohlížeč regulačních dokumentů",
-        "viewer_placeholder": "👈 Položte otázku vlevo pro zobrazení dokumentu.",
-        "waiting_msg": "Čekám na analýzu...",
-        "waiting_sub": "Nahrajte dokument a položte otázku."
+    "cs": {
+        "sidebar_title": "📂 Znalostní báze",
+        "source_select": "Vybrat zdroj:",
+        "option_upload": "📤 Nahrát nový soubor",
+        "option_library": "📚 Veřejná knihovna (Vestavěná)",
+        "library_label": "Vyberte dokument:",
+        "upload_label": "Nahrát PDF",
+        "chat_placeholder": "Zeptejte se na IFRS 17...",
+        "ingest_btn": "Zpracovat",
+        "analyzing": "🔍 Hledám...",
+        "snippet_label": "💡 Relevantní kontext:",
+        "page_ref": "Strana"
     }
 }
 
-# --- 2. 页面初始化 ---
-st.set_page_config(
-    page_title="IFRS 17 Copilot",
-    page_icon="📊",
-    layout="wide"
-)
 
-BACKEND_URL = os.getenv("BACKEND_URL", "http://localhost:8000")
+# frontend/app.py
 
-# --- 3. 状态管理与辅助函数 ---
-if "language" not in st.session_state:
-    st.session_state.language = "en"  # 默认英语
+def login_ui():
+    st.title("🔐 IFRS 17 Copilot 登录")
+    with st.form("login_form"):
+        username = st.text_input("用户名")
+        password = st.text_input("密码", type="password")
+        submit = st.form_submit_button("进入系统")
 
-def get_text(key):
-    """根据当前语言获取对应的文本"""
-    lang = st.session_state.language
-    return TRANSLATIONS[lang].get(key, f"MISSING_{key}")
+        if submit:
+            res = requests.post(
+                f"{BACKEND_URL}/api/v1/auth/login",
+                data={"username": username, "password": password}
+            )
+            if res.status_code == 200:
+                token = res.json()["access_token"]
+                st.session_state.authenticated = True
+                st.session_state.token = token
+                st.session_state.username = username
+                st.success("Welcome back!")
+                st.rerun()
+            else:
+                st.error("Invalid username or password.")
 
-# 自定义 CSS
-st.markdown("""
-    <style>
-    .main { background-color: #f8f9fa; }
-    .stChatMessage { border-radius: 15px; padding: 10px; margin-bottom: 10px; }
-    /* 针对 pdf_viewer 的容器样式微调 */
-    div[data-testid="stIFrame"] { border: 1px solid #e0e0e0; border-radius: 8px; }
-    </style>
-    """, unsafe_allow_html=True)
+# --- 逻辑控制 ---
+if "authenticated" not in st.session_state:
+    st.session_state.authenticated = False
 
-# --- 4. 侧边栏 (Sidebar) ---
+if not st.session_state.authenticated:
+    login_ui()
+    st.stop() # 🛑 核心：不登录就不执行后面的 RAG 逻辑
+
+@st.cache_data(ttl=3600)  # 缓存 1 小时
+def fetch_pdf_binary(base_url, filename):
+    """从后端获取 PDF 二进制流，并缓存以提高速度"""
+    url = f"{base_url}/api/v1/files/{filename}"
+    try:
+        response = requests.get(url)
+        if response.status_code == 200:
+            return response.content
+        return None
+    except Exception:
+        return None
+
+if "language" not in st.session_state: st.session_state.language = "en"
+def get_text(key): return TRANSLATIONS[st.session_state.language].get(key, key)
+
+# --- 侧边栏 (Sidebar) ---
 with st.sidebar:
-    # --- 语言切换器 (Language Switcher) ---
-    lang_choice = st.radio(
-        "Language / Jazyk",
+    # 1. 语言切换 (保持不变)
+    st.radio(
+        "Language",
         ["English", "Čeština"],
+        key="lang_radio",
         index=0 if st.session_state.language == "en" else 1,
-        horizontal=True
+        on_change=lambda: st.session_state.update(language="en" if st.session_state.lang_radio=="English" else "cs")
     )
-    # 更新状态
-    if lang_choice == "English":
-        st.session_state.language = "en"
-    else:
-        st.session_state.language = "cs"
 
     st.divider()
 
-    # ---原本的上传逻辑 ---
-    st.header(get_text("sidebar_title"))
-    uploaded_file = st.file_uploader(get_text("upload_label"), type=["pdf", "txt"])
+    # 2. 内置公共库 (Public Library)
+    st.header(get_text("sidebar_title")) # "Document Ingestion" -> 改意为 "Knowledge Base" 更好
+    st.subheader("📚 " + get_text("option_library"))
 
-    if st.button(get_text("ingest_btn"), use_container_width=True):
-        if uploaded_file is not None:
-            with st.spinner("Uploading..."):
+    # === 关键修改点：定义内置文件列表 ===
+    # 这些文件名必须与你 knowledge_base/public 文件夹里的文件名一模一样！
+    LIBRARY_FILES = [
+        "ifrs17_regulation_eu_2021.pdf",
+        # "solvency_ii_directive.pdf",  # 以后有了新文件加在这里
+        # "czech_insurance_act.pdf"
+    ]
+
+    # 使用 multiselect 实现“即点即用，取消即停”
+    # 这里的 default=[] 表示默认不选，你可以改成 default=LIBRARY_FILES 默认全选
+    selected_library_docs = st.multiselect(
+        label=get_text("library_label"),
+        options=LIBRARY_FILES,
+        default=[],
+        placeholder="Select regulations..."
+    )
+
+    st.divider()
+
+    # 3. 私有文件上传 (Private Upload)
+    st.subheader("📤 " + get_text("option_upload"))
+
+    # 使用 session_state 来记住用户上传成功的文件名
+    if "my_uploaded_files" not in st.session_state:
+        st.session_state.my_uploaded_files = []
+
+    uploaded_file = st.file_uploader(get_text("upload_label"), type=["pdf"])
+
+    if uploaded_file:
+        # 如果点击上传按钮
+        # 如果点击上传按钮
+        if st.button(get_text("ingest_btn"), use_container_width=True):
+            with st.spinner("Processing..."):
                 try:
                     files = {"file": (uploaded_file.name, uploaded_file.getvalue())}
-                    response = requests.post(f"{BACKEND_URL}/api/v1/ingest", files=files)
-                    if response.status_code == 200:
-                        st.success(f"{get_text('ingest_success')} {uploaded_file.name}")
+
+                    # 🌟 同样构造 headers
+                    headers = {
+                        "Authorization": f"Bearer {st.session_state.token}"
+                    }
+
+                    # 调用后端入库接口，带上 headers
+                    res = requests.post(
+                        f"{BACKEND_URL}/api/v1/ingest",
+                        files=files,
+                        headers=headers  # 👈 加上这一行
+                    )
+
+                    if res.status_code == 200:
+                        st.success(f"✅ {get_text('ingest_success')}")
+                        # 将上传成功的文件名加入到 session 记录中，防止页面刷新后丢失
+                        if uploaded_file.name not in st.session_state.my_uploaded_files:
+                            st.session_state.my_uploaded_files.append(uploaded_file.name)
                     else:
-                        st.error(f"{get_text('ingest_error')} {response.json().get('detail')}")
+                        st.error(f"{get_text('ingest_error')} {res.json().get('detail')}")
                 except Exception as e:
                     st.error(f"{get_text('connect_error')} {str(e)}")
-        else:
-            st.warning(get_text("select_file_warn"))
 
-    st.divider()
-    st.markdown(get_text("expertise_title"))
-    st.markdown("""
-    - General Model (BBA/GMM)
-    - Premium Allocation (PAA)
-    - Variable Fee (VFA)
-    - CSM & Risk Adjustment
-    """)
+    # 显示已上传的文件，并允许用户勾选是否将其包含在搜索中
+    selected_private_docs = []
+    if st.session_state.my_uploaded_files:
+        st.caption("Your Uploaded Files:")
+        for f_name in st.session_state.my_uploaded_files:
+            # 默认勾选刚上传的文件
+            if st.checkbox(f"📄 {f_name}", value=True, key=f"chk_{f_name}"):
+                selected_private_docs.append(f_name)
 
-# --- 5. 主页面布局 ---
-st.title(get_text("page_title"))
+    # === 4. 汇总所有被选中的文件 ===
+    # 这个变量 active_docs 就是我们要传给聊天框去搜索的最终列表
+    active_docs = selected_library_docs + selected_private_docs
 
-# 初始化消息历史
-if "messages" not in st.session_state:
-    st.session_state.messages = []
-if "current_analysis" not in st.session_state:
-    st.session_state.current_analysis = None
+    # 将其存入 session_state 供主页面使用
+    st.session_state.active_docs = active_docs
 
-# 分栏
-col_left, col_right = st.columns([1, 1.2])
+    # 调试显示 (可选，开发完后可以注释掉)
+    if active_docs:
+        st.success(f"🔍 Searching in {len(active_docs)} document(s)")
+    else:
+        st.warning("⚠️ No documents selected.")
 
-# === 左栏：聊天 ===
-with col_left:
-    st.subheader(get_text("chat_title"))
 
-    # 显示历史
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+# --- 主界面 (Main Interface) ---
+st.title("📊 IFRS 17 Copilot")
 
-    # 输入框
+# 初始化 Session State
+if "messages" not in st.session_state: st.session_state.messages = []
+if "current_analysis" not in st.session_state: st.session_state.current_analysis = None
+
+# 分栏布局：左侧聊天，右侧文档预览
+col1, col2 = st.columns([1, 1.2])
+
+# === 左栏：聊天窗口 ===
+with col1:
+    # 1. 显示聊天历史
+    for msg in st.session_state.messages:
+        st.chat_message(msg["role"]).write(msg["content"])
+
+    # 2. 处理用户输入
     if prompt := st.chat_input(get_text("chat_placeholder")):
+        # 先把用户的问题显示出来
         st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+        st.chat_message("user").write(prompt)
 
+        # 3. 准备调用后端
         with st.chat_message("assistant"):
+            # 获取侧边栏选中的所有文件 (我们在侧边栏里存进去的)
+            active_docs = st.session_state.get("active_docs", [])
+
+            # --- 🛑 关键拦截：如果用户没选任何文件，直接报错，不发请求 ---
+            if not active_docs:
+                st.warning("⚠️ Please select at least one document from the sidebar to start searching.")
+                st.stop() # 停止运行，节省资源
+
             with st.spinner(get_text("analyzing")):
                 try:
-                    # 注意：这里我们不需要改后端的 language 参数，
-                    # 因为我们希望 AI 根据用户输入的问题语言自动决定回答语言。
-                    # 获取当前选中的语言代码 ('en' 或 'cs')
-                    current_lang = st.session_state.language
+                    payload = {
+                        "query": prompt,
+                        "language": st.session_state.language,
+                        "selected_files": active_docs
+                    }
 
-                    # 传给后端
-                    payload = {"query": prompt, "language": current_lang}
-                    response = requests.post(f"{BACKEND_URL}/api/v1/query", json=payload)
+                    # 🌟 核心修复：构造请求头，带上你的 Token！
+                    headers = {
+                        "Authorization": f"Bearer {st.session_state.token}"
+                    }
 
-                    if response.status_code == 200:
-                        data = response.json()
-                        answer = data["answer"]
+                    # 🌟 发送请求时，把 headers 传进去
+                    res = requests.post(
+                        f"{BACKEND_URL}/api/v1/query",
+                        json=payload,
+                        headers=headers  # 👈 就是加了这一行
+                    )
+
+                    if res.status_code == 200:
+                        data = res.json()
+                        answer = data.get("answer", "No answer provided.")
+
+                        # 显示 AI 回答
                         st.markdown(answer)
 
-                        st.session_state.current_analysis = data
+                        # 保存上下文
                         st.session_state.messages.append({"role": "assistant", "content": answer})
+                        st.session_state.current_analysis = data
+
+                        # 显示引用来源的简要提示
+                        if data.get("sources"):
+                            num_sources = len(data["sources"])
+                            st.caption(f"📚 Referenced {num_sources} source(s) from selected documents.")
+
                     else:
-                        st.error(f"{get_text('backend_error')} {response.status_code}")
+                        st.error(f"Backend Error ({res.status_code}): {res.text}")
+
                 except Exception as e:
-                    st.error(f"{get_text('connect_error')} {str(e)}")
+                    st.error(f"Connection Error: {str(e)}")
 
-    # 来源选择器
-    if st.session_state.current_analysis and st.session_state.current_analysis.get("sources"):
-        data = st.session_state.current_analysis
-        st.divider()
-        st.markdown(get_text("source_trace"))
+# === 右栏：文档预览 (保持 PDF Viewer 逻辑) ===
+with col2:
+    if st.session_state.current_analysis:
+        analysis = st.session_state.current_analysis
+        sources = analysis.get("sources", [])
 
-        # 构造选项
-        source_options = [
-            f"Src {i+1}: {s['document_id']} (Pg {s.get('page_number', '?')})"
-            for i, s in enumerate(data["sources"])
-        ]
+        if sources:
+            st.subheader("📄 Document Context")
 
-        selected_idx = st.radio(
-            get_text("select_source_instruction"),
-            range(len(source_options)),
-            format_func=lambda x: source_options[x],
-            key="source_selector"
-        )
+            tab_labels = [f"[{i+1}] Page {s.get('page_number', '?')}" for i, s in enumerate(sources)]
+            tabs = st.tabs(tab_labels)
 
-        current_source = data["sources"][selected_idx]
-        st.info(f"{get_text('snippet_label')}\n\n...{current_source['text_snippet']}...")
+            for i, tab in enumerate(tabs):
+                src = sources[i]
+                with tab:
+                    doc_id = src.get("document_id", "Unknown")
+                    try:
+                        page_num = int(src.get("page_number", 1))
+                    except:
+                        page_num = 1
+                    snippet = src.get("text_snippet", "...")
+                    para_id = src.get("paragraph_id", "N/A")
 
-# === 右栏：PDF 预览 (使用 streamlit-pdf-viewer + 二进制流) ===
-with col_right:
-    if st.session_state.current_analysis and st.session_state.current_analysis.get("sources"):
-        st.subheader(get_text("viewer_title"))
+                    st.info(f"📍 **Location:** {doc_id} | **Page {page_num}**")
 
-        # 获取当前选择的索引
-        idx = st.session_state.get("source_selector", 0)
-        if idx >= len(st.session_state.current_analysis["sources"]): idx = 0
+                    # 显示黄色高亮提示框
+                    st.warning(
+                        f"**Source:** {doc_id}\n\n"
+                        f"**Location:** Page {page_num} (Para {para_id})\n\n"
+                        f"💡 **Snippet:** ...{snippet}..."
+                    )
 
-        target_source = st.session_state.current_analysis["sources"][idx]
-        doc_id = target_source['document_id']
-        page_num = int(target_source.get('page_number', 1))
+                    # 尝试加载 PDF
+                    # 注意：这里需要后端提供文件下载接口，或者直接读取本地文件
+                    # 如果你还没有做文件服务，这里暂时只显示文本即可
+                    pdf_url = f"{BACKEND_URL}/api/v1/files/{doc_id}" # 假设你之后会做这个接口
 
-        st.caption(f"Document: {doc_id} | Page: **{page_num}**")
+                    pdf_binary = fetch_pdf_binary(BACKEND_URL, doc_id)
 
+                    if pdf_binary:
+                        # 2. 渲染 PDF
+                        # 注意 key 的构造：一定要包含 page_num
+                        # 这样当页码变化时，Streamlit 会强制销毁旧组件，创建新组件并滚动到新位置
+                        pdf_viewer(
+                            input=pdf_binary,
+                            width=700,
+                            height=800,
+                            scroll_to_page=page_num,  # 👈 自动跳转的核心参数
+                            render_text=True,         # 允许选中文本复制
+                            key=f"pdf_v_{i}_{doc_id}_{page_num}" # 🔥 唯一且动态的 Key
+                        )
+                    else:
+                        st.error(f"❌ Failed to load PDF: {doc_id}")
+                    # --- 🚀 核心优化结束 ---
 
-		# --- 核心修改 1：黄色高亮提示框 ---
-        # 1. 获取 AI 检索到的那段原文
-        snippet = target_source.get('text_snippet', 'No snippet available.')
-
-        # 2. 使用 st.warning 生成黄色框
-        # 这里的 f-string 负责把文档名、页码和原文片段拼接到框里
-        st.warning(
-            f"📄 **{doc_id}** | Page: **{page_num}**\n\n"
-            f"💡 **Look for this text (请在下方寻找此段文字):**\n\n"
-            f"> *{snippet}*"
-        )
-        # 构造 URL
-        pdf_url = f"{BACKEND_URL}/files/{doc_id}"
-
-        try:
-            # 获取二进制数据，绕过浏览器跨域屏蔽
-            response_pdf = requests.get(pdf_url)
-
-            if response_pdf.status_code == 200:
-                binary_pdf = response_pdf.content
-
-                # 渲染 PDF，并自动跳到指定页
-                pdf_viewer(
-                    input=binary_pdf,
-                    width=700,
-                    height=800,
-                    scroll_to_page=page_num
-                )
-            else:
-                st.error("Error loading PDF from backend.")
-
-        except Exception as e:
-            st.error(f"Viewer Error: {str(e)}")
-
+        else:
+            st.info("No sources cited.")
     else:
-        # 空状态显示
-        st.subheader(get_text("viewer_title"))
+        # 空状态：显示一个占位图或文字
         st.markdown(
             f"""
-            <div style='text-align: center; color: gray; padding: 100px; border: 2px dashed #e0e0e0; border-radius: 10px;'>
-                <h3>{get_text('waiting_msg')}</h3>
-                <p>{get_text('waiting_sub')}</p>
+            <div style='text-align: center; color: #888; padding: 100px; border: 2px dashed #ddd; border-radius: 10px;'>
+                <h3>👈 Ask a question to see documents</h3>
+                <p>Select documents from the sidebar first.</p>
             </div>
             """,
             unsafe_allow_html=True
         )
+
