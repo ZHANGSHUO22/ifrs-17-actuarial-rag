@@ -4,11 +4,8 @@ from pydantic import BaseModel, Field, field_validator
 
 class QueryRequest(BaseModel):
     query: str = Field(..., description="用户的提问")
-
-    # 这里放宽限制，允许任何语言代码传入 (en, cs, sk, tr, zh 等)
-    # 这样你就不用每次加一种语言都来改代码了
     language: Optional[str] = Field("en", description="语言代码 (e.g., 'en', 'cs', 'sk')")
-
+    selected_files: Optional[List[str]] = None
 class SourceMetadata(BaseModel):
     """
     Metadata for retrieved regulatory sources.
@@ -16,6 +13,7 @@ class SourceMetadata(BaseModel):
     document_id: str
     page_number: int
     text_snippet: str
+    paragraph_id: str = "N/A"  # 🌟 必须加上这一行，后端才能传出段落 ID
 
 class QueryResponse(BaseModel):
     answer: str = Field(..., description="AI 生成的回答")
