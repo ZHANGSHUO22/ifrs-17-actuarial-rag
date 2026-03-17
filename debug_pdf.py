@@ -4,7 +4,7 @@ import os
 
 # 请确保路径正确，指向你的 public 文件夹
 # 如果你在根目录运行，路径应该是 knowledge_base/public/...
-file_path = "knowledge_base/public/ifrs17_regulation_eu_2021.pdf"
+file_path = "knowledge_base/public/ifrs17_eu_07.2025.pdf"
 
 if not os.path.exists(file_path):
     print(f"❌ 找不到文件: {file_path}")

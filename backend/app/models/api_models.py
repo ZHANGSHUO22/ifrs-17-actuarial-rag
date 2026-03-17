@@ -13,7 +13,7 @@ class SourceMetadata(BaseModel):
     document_id: str
     page_number: int
     text_snippet: str
-    paragraph_id: str = "N/A"  # 🌟 必须加上这一行，后端才能传出段落 ID
+    para_id: str = "N/A"  # 🌟 必须加上这一行，后端才能传出段落 ID
 
 class QueryResponse(BaseModel):
     answer: str = Field(..., description="AI 生成的回答")
